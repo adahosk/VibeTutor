@@ -1,0 +1,7 @@
+{
+  "name": "Syllabus Engine AI",
+  "description": "An interactive, AI-powered learning platform that converts static syllabus PDFs into dynamic, modular courses with contextual tutoring and knowledge graphs.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
