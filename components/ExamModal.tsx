@@ -20,7 +20,7 @@ const ExamModal: React.FC<Props> = ({ isOpen, onClose, questions }) => {
 
   const calculateScore = () => {
     let score = 0;
-    questions.forEach(q => {
+    (questions || []).forEach(q => {
       if (answers[q.id] === q.correctAnswerIndex) score++;
     });
     return score;
@@ -37,7 +37,7 @@ const ExamModal: React.FC<Props> = ({ isOpen, onClose, questions }) => {
         </div>
 
         <div className="p-6 space-y-8 flex-1 overflow-y-auto">
-          {questions.map((q, idx) => (
+          {questions?.map((q, idx) => (
             <div key={q.id} className="space-y-3">
               <p className="font-semibold text-lg text-slate-800">{idx + 1}. {q.question}</p>
               <div className="space-y-2">
@@ -80,7 +80,7 @@ const ExamModal: React.FC<Props> = ({ isOpen, onClose, questions }) => {
         <div className="p-6 border-t border-gray-100 bg-slate-50 rounded-b-xl flex justify-between items-center">
             {submitted ? (
                  <div className="text-lg font-bold">
-                    Score: {calculateScore()} / {questions.length}
+                    Score: {calculateScore()} / {(questions || []).length}
                  </div>
             ) : (
                 <div className="text-sm text-gray-500">Answer all questions to submit</div>
@@ -89,7 +89,7 @@ const ExamModal: React.FC<Props> = ({ isOpen, onClose, questions }) => {
           {!submitted ? (
              <button
                 onClick={() => setSubmitted(true)}
-                disabled={Object.keys(answers).length !== questions.length}
+                disabled={Object.keys(answers).length !== (questions || []).length}
                 className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
              >
                 Submit Exam

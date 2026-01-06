@@ -11,7 +11,7 @@ const KnowledgeGraph: React.FC<Props> = ({ data, onNodeClick }) => {
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
-    if (!svgRef.current || !data.nodes.length) return;
+    if (!svgRef.current || !data || !Array.isArray(data.nodes) || !data.nodes.length) return;
 
     const width = svgRef.current.clientWidth;
     const height = 400;
@@ -26,7 +26,8 @@ const KnowledgeGraph: React.FC<Props> = ({ data, onNodeClick }) => {
 
     // Copy data to avoid mutation issues with React state
     const nodes = data.nodes.map(d => ({ ...d }));
-    const links = data.links.map(d => ({ ...d }));
+    // Links might be missing in partial generation
+    const links = (data.links || []).map(d => ({ ...d }));
 
     const simulation = d3.forceSimulation(nodes as any)
       .force("link", d3.forceLink(links).id((d: any) => d.id).distance(100))

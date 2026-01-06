@@ -19,8 +19,26 @@ export const fileToGenerativePart = async (file: File): Promise<string> => {
   });
 };
 
+// Helper for safe JSON parsing
+const safeParseJSON = (text: string | undefined): any => {
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        // Try cleaning markdown code blocks
+        try {
+            const cleaned = text.replace(/```json\s*|\s*```/g, "").trim();
+            return JSON.parse(cleaned);
+        } catch (e2) {
+            console.error("Failed to parse JSON:", e2);
+            return null;
+        }
+    }
+};
+
 export const parseSyllabus = async (fileBase64: string): Promise<CourseStructure> => {
-  const modelId = "gemini-3-pro-preview";
+  // Use Flash for fast structural extraction
+  const modelId = "gemini-3-flash-preview";
   
   const response = await ai.models.generateContent({
     model: modelId,
@@ -40,7 +58,7 @@ export const parseSyllabus = async (fileBase64: string): Promise<CourseStructure
       ]
     },
     config: {
-      thinkingConfig: { thinkingBudget: 32768 },
+      // Removed high thinking budget to prevent timeouts
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
@@ -64,9 +82,18 @@ export const parseSyllabus = async (fileBase64: string): Promise<CourseStructure
     }
   });
 
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-  return JSON.parse(text) as CourseStructure;
+  const parsed = safeParseJSON(response.text);
+  
+  if (!parsed) {
+      throw new Error("Failed to parse syllabus structure. The response might be incomplete or invalid.");
+  }
+  
+  // Robustness check
+  return {
+    title: parsed.title || "Untitled Course",
+    description: parsed.description || "",
+    modules: Array.isArray(parsed.modules) ? parsed.modules : []
+  } as CourseStructure;
 };
 
 export const generateLessonContent = async (
@@ -75,15 +102,21 @@ export const generateLessonContent = async (
   topics: string[],
   depth: ContentDepth
 ): Promise<string> => {
-  const modelId = "gemini-3-pro-preview"; // Using Pro for deeper reasoning on content
+  // Use Pro for Deep Dive, Flash for others for speed
+  const isDeepDive = depth === ContentDepth.DEEP_DIVE;
+  const modelId = isDeepDive ? "gemini-3-pro-preview" : "gemini-3-flash-preview";
 
   let depthInstruction = "";
+  let thinkingConfig = undefined;
+
   switch (depth) {
     case ContentDepth.SUMMARY:
       depthInstruction = "Provide a high-level summary with bullet points and key terms only. Be concise.";
       break;
     case ContentDepth.DEEP_DIVE:
       depthInstruction = "Provide an academic deep dive. Expand on every point with rigorous detail, examples, analogies, and theoretical background. Cite concepts where appropriate.";
+      // Enable thinking for deep dive
+      thinkingConfig = { thinkingBudget: 8192 }; 
       break;
     case ContentDepth.STANDARD:
     default:
@@ -113,6 +146,9 @@ export const generateLessonContent = async (
           Based ONLY on the context of the provided syllabus, but you may expand with general knowledge to explain concepts better.`
         }
       ]
+    },
+    config: {
+        thinkingConfig
     }
   });
 
@@ -120,86 +156,99 @@ export const generateLessonContent = async (
 };
 
 export const generateKnowledgeGraph = async (syllabusBase64: string): Promise<KnowledgeGraphData> => {
-    const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
-            parts: [
-                { inlineData: { mimeType: "application/pdf", data: syllabusBase64 } },
-                { text: `Generate a knowledge graph representation of this course. 
-                Identify key concepts (nodes) and their dependencies (links). 
-                If Concept B requires Concept A, create a link from A to B.
-                Return JSON.` }
-            ]
-        },
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    nodes: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                id: { type: Type.STRING },
-                                label: { type: Type.STRING },
-                                group: { type: Type.INTEGER },
-                                status: { type: Type.STRING, enum: ["locked", "available", "completed"] }
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: "application/pdf", data: syllabusBase64 } },
+                    { text: `Generate a knowledge graph representation of this course. 
+                    Identify key concepts (nodes) and their dependencies (links). 
+                    If Concept B requires Concept A, create a link from A to B.
+                    Return JSON.` }
+                ]
+            },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        nodes: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    label: { type: Type.STRING },
+                                    group: { type: Type.INTEGER },
+                                    status: { type: Type.STRING, enum: ["locked", "available", "completed"] }
+                                }
                             }
-                        }
-                    },
-                    links: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                source: { type: Type.STRING },
-                                target: { type: Type.STRING },
-                                value: { type: Type.NUMBER }
+                        },
+                        links: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    source: { type: Type.STRING },
+                                    target: { type: Type.STRING },
+                                    value: { type: Type.NUMBER }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-    });
+        });
 
-    const text = response.text;
-    return text ? JSON.parse(text) : { nodes: [], links: [] };
+        const parsed = safeParseJSON(response.text) || {};
+        return {
+            nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+            links: Array.isArray(parsed.links) ? parsed.links : []
+        };
+    } catch (e) {
+        console.warn("Knowledge graph generation failed:", e);
+        return { nodes: [], links: [] };
+    }
 }
 
 export const generateExam = async (syllabusBase64: string, moduleTitle: string): Promise<ExamQuestion[]> => {
-    const response = await ai.models.generateContent({
-        model: "gemini-3-pro-preview",
-        contents: {
-            parts: [
-                { inlineData: { mimeType: "application/pdf", data: syllabusBase64 } },
-                { text: `Generate a 5-question multiple choice exam for the module: "${moduleTitle}".
-                Ensure questions test understanding, not just recall.
-                Return strictly JSON.` }
-            ]
-        },
-        config: {
-            thinkingConfig: { thinkingBudget: 4096 },
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        id: { type: Type.INTEGER },
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        correctAnswerIndex: { type: Type.INTEGER },
-                        explanation: { type: Type.STRING }
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3-pro-preview",
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: "application/pdf", data: syllabusBase64 } },
+                    { text: `Generate a 5-question multiple choice exam for the module: "${moduleTitle}".
+                    Ensure questions test understanding, not just recall.
+                    Return strictly JSON.` }
+                ]
+            },
+            config: {
+                thinkingConfig: { thinkingBudget: 4096 },
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.INTEGER },
+                            question: { type: Type.STRING },
+                            options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            correctAnswerIndex: { type: Type.INTEGER },
+                            explanation: { type: Type.STRING }
+                        }
                     }
                 }
             }
-        }
-    });
-    
-    const text = response.text;
-    return text ? JSON.parse(text) : [];
+        });
+        
+        const parsed = safeParseJSON(response.text) || [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        console.error("Exam generation failed:", e);
+        return [];
+    }
 }
 
 export const generateAudioLesson = async (textToSpeak: string): Promise<string | undefined> => {

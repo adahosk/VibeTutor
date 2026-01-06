@@ -40,6 +40,9 @@ const App: React.FC = () => {
   const [examQuestions, setExamQuestions] = useState<ExamQuestion[]>([]);
   const [showExam, setShowExam] = useState(false);
 
+  // UI State
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -69,12 +72,14 @@ const App: React.FC = () => {
         const struct = await parseSyllabus(base64);
         setStructure(struct);
 
-        // Step 2: Generate Knowledge Graph in background
-        generateKnowledgeGraph(base64).then(setGraphData);
+        // Step 2: Generate Knowledge Graph in background with error handling
+        generateKnowledgeGraph(base64)
+            .then(setGraphData)
+            .catch(err => console.error("Background graph generation error:", err));
 
       } catch (err) {
         console.error(err);
-        alert("Failed to process syllabus. Please try again.");
+        alert("Failed to process syllabus. Please try again or use a smaller file.");
       } finally {
         setLoadingStructure(false);
       }
@@ -84,6 +89,7 @@ const App: React.FC = () => {
   // Handle Module Selection
   const handleModuleSelect = async (module: CourseModule) => {
     setActiveModule(module);
+    setIsMobileMenuOpen(false); // Close mobile menu on selection
     setLoadingContent(true);
     try {
         if (!syllabusFile) return;
@@ -227,23 +233,42 @@ const App: React.FC = () => {
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
               <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600 mb-4"></div>
               <p className="text-xl font-medium text-slate-700">Analyzing Syllabus Structure...</p>
-              <p className="text-sm text-slate-500">This requires deep thinking (Gemini 3 Pro)</p>
+              <p className="text-sm text-slate-500">This may take a moment</p>
           </div>
       );
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="flex h-[100dvh] bg-slate-50 text-slate-900 font-sans relative overflow-hidden">
       
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+        ></div>
+      )}
+
       {/* Sidebar */}
-      <div className="w-72 bg-white border-r border-slate-200 flex flex-col hidden md:flex">
-        <div className="p-5 border-b border-slate-100">
-            <h1 className="font-bold text-xl text-slate-800 tracking-tight">{structure?.title}</h1>
-            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{structure?.description}</p>
+      <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 flex flex-col transform transition-transform duration-300 md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-5 border-b border-slate-100 flex justify-between items-start shrink-0">
+            <div>
+                <h1 className="font-bold text-xl text-slate-800 tracking-tight">{structure?.title}</h1>
+                <p className="text-xs text-slate-500 mt-1 line-clamp-2">{structure?.description}</p>
+            </div>
+            {/* Close button for mobile */}
+            <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400">
+                <i className="fas fa-times"></i>
+            </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+        <div className="flex-1 overflow-y-auto min-h-0 p-3 space-y-1">
             <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Modules</div>
-            {structure?.modules.map((mod, idx) => (
+            {(!structure?.modules || structure.modules.length === 0) && (
+                <div className="px-3 py-4 text-sm text-slate-500 italic text-center">
+                    No modules found. Please try uploading the syllabus again.
+                </div>
+            )}
+            {structure?.modules?.map((mod, idx) => (
                 <button
                     key={idx}
                     onClick={() => handleModuleSelect(mod)}
@@ -253,14 +278,14 @@ const App: React.FC = () => {
                         : 'text-slate-600 hover:bg-slate-50'
                     }`}
                 >
-                    <span>{idx + 1}. {mod.title}</span>
-                    {activeModule?.title === mod.title && <i className="fas fa-chevron-right text-xs"></i>}
+                    <span className="truncate">{idx + 1}. {mod.title}</span>
+                    {activeModule?.title === mod.title && <i className="fas fa-chevron-right text-xs shrink-0 ml-2"></i>}
                 </button>
             ))}
         </div>
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-100 shrink-0">
              <button 
-                onClick={() => setShowGraph(true)}
+                onClick={() => { setShowGraph(true); setIsMobileMenuOpen(false); }}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 py-2 rounded-lg text-sm font-medium hover:bg-indigo-100 transition"
              >
                  <i className="fas fa-project-diagram"></i> View Knowledge Graph
@@ -269,16 +294,24 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative w-full">
           
           {/* Header */}
-          <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
-              <h2 className="font-bold text-slate-700 truncate">
-                  {activeModule ? activeModule.title : "Welcome to your Course"}
-              </h2>
-              <div className="flex items-center gap-3">
+          <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0">
+              <div className="flex items-center gap-3 overflow-hidden">
+                <button 
+                    onClick={() => setIsMobileMenuOpen(true)}
+                    className="md:hidden text-slate-600 p-1 hover:text-slate-900"
+                >
+                    <i className="fas fa-bars text-xl"></i>
+                </button>
+                <h2 className="font-bold text-slate-700 truncate">
+                    {activeModule ? activeModule.title : "Welcome to your Course"}
+                </h2>
+              </div>
+              <div className="flex items-center gap-2 md:gap-3">
                   {/* Depth Slider */}
-                  <div className="flex items-center bg-slate-100 rounded-lg p-1 mr-4">
+                  <div className="hidden md:flex items-center bg-slate-100 rounded-lg p-1 mr-4">
                       {Object.values(ContentDepth).map((d) => (
                           <button
                             key={d}
@@ -305,19 +338,21 @@ const App: React.FC = () => {
                   <button 
                     onClick={startExam}
                     disabled={!activeModule}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition shadow-sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 md:px-4 rounded-lg text-sm font-medium transition shadow-sm whitespace-nowrap"
                   >
-                      Simulate Exam
+                      <span className="hidden md:inline">Simulate Exam</span>
+                      <span className="md:hidden">Exam</span>
                   </button>
               </div>
           </header>
 
           {/* Content Body */}
-          <div className="flex-1 overflow-y-auto p-8 relative" onMouseUp={handleExplainSelection}>
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 relative" onMouseUp={handleExplainSelection}>
               {!activeModule ? (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4 text-center">
                       <i className="fas fa-layer-group text-5xl mb-4 text-slate-200"></i>
-                      <p>Select a module from the sidebar to begin learning.</p>
+                      <p className="text-lg font-medium text-slate-600">Select a module from the sidebar to begin learning.</p>
+                      <p className="text-sm mt-2 md:hidden text-slate-500">(Tap the menu icon top-left)</p>
                   </div>
               ) : loadingContent ? (
                   <div className="space-y-4 animate-pulse">
@@ -329,6 +364,24 @@ const App: React.FC = () => {
                   </div>
               ) : (
                   <div className="markdown-body max-w-4xl mx-auto pb-20">
+                      <div className="md:hidden mb-4 p-2 bg-slate-100 rounded text-center">
+                           <p className="text-xs font-bold uppercase text-slate-500 mb-2">Content Depth</p>
+                           <div className="flex justify-center gap-2">
+                            {Object.values(ContentDepth).map((d) => (
+                                <button
+                                    key={d}
+                                    onClick={() => setContentDepth(d)}
+                                    className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                                        contentDepth === d 
+                                        ? 'bg-white text-slate-800 shadow-sm' 
+                                        : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    {d}
+                                </button>
+                            ))}
+                           </div>
+                      </div>
                       <ReactMarkdown>{lessonContent}</ReactMarkdown>
                   </div>
               )}
@@ -336,7 +389,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Sidekick Chat (Floating or Panel) */}
-      <div className={`fixed inset-y-0 right-0 w-96 bg-white shadow-2xl transform transition-transform duration-300 z-40 flex flex-col ${chatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div className={`fixed inset-y-0 right-0 w-96 max-w-full bg-white shadow-2xl transform transition-transform duration-300 z-50 flex flex-col ${chatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           <div className="p-4 bg-blue-600 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
                   <i className="fas fa-robot"></i>
